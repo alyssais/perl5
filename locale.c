@@ -1134,19 +1134,21 @@ S_emulate_setlocale_i(pTHX_
 
 #  ifndef USE_QUERYLOCALE
 
+    /* If we have querylocale(), we can just set things to "" and see what
+     * happens (which is what happens below when we do have it), but without
+     * it, we have to figure out what it would return, and pretend that we were
+     * instead called with that */
     if (strEQ(new_locale, "")) {
         new_locale = find_locale_from_environment(index);
-        }
+    }
 
+    /* Also, special parsing is needed for when the new overarching locale is
+     * composed of categories with disparate individual locales.  So far, the
+     * only such ones we've encountered that can handle POSIX 2008 are of the
+     * same form, with semi-colon separators */
     if (strchr(new_locale, ';')) {
         return setlocale_from_aggregate_LC_ALL(new_locale, line);
-            }
-
-    /* Here at the end of having to deal with the absence of querylocale().
-     * Some cases have already been fully handled by recursive calls to this
-     * function.  But at this point, we haven't dealt with those, but are now
-     * prepared to, knowing what the locale name to set this category to is.
-     * This would have come for free if this system had had querylocale() */
+    }
 
 #  endif  /* end of ! querylocale */
 #  ifdef HAS_GLIBC_LC_MESSAGES_BUG
@@ -1164,66 +1166,78 @@ S_emulate_setlocale_i(pTHX_
     PERL_UNUSED_VAR(old_messages_locale);
 #  endif
 
-    assert(PL_C_locale_obj);
+    /* Now ready to switch to the input 'new_locale' */
 
-    /* Switching locales generally entails freeing the current one's space (at
-     * the C library's discretion), hence we can't be using that locale at the
-     * time of the switch (this wasn't obvious to khw from the man pages).  So
-     * switch to a known locale object that we don't otherwise mess with; the
-     * function returns the locale object in effect prior to the switch. */
-    old_obj = uselocale(PL_C_locale_obj);
+    if (mask == LC_ALL_MASK) {
 
-    DEBUG_Lv(PerlIO_printf(Perl_debug_log,
-             "(%d): emulate_setlocale_i was using %p\n", line, old_obj));
+        /* If we're changing all categories, the old state is completely
+         * discarded, and a new object is created from scratch ... */
+        new_obj = newlocale(LC_ALL_MASK, new_locale, (locale_t) 0);
+        if (UNLIKELY(new_obj == NULL)) {
+            old_obj = NULL; /* Don't try to switch back; we never left */
+            goto bad_newlocale;
+        }
 
-    if (! old_obj) {
-        DEBUG_L(PerlIO_printf(Perl_debug_log,
-                              "(%d): emulate_setlocale_i switching to C"
-                              " failed: %d\n", line, GET_ERRNO));
-        return NULL;
-    }
+        /* ... and then switched into, returning the previous, now superfluous
+         * old state ... */
+        old_obj = uselocale(new_obj);
+        if (UNLIKELY(old_obj == NULL)) {  /* Shouldn't fail */
+            goto bad_uselocale;
+        }
+        else {
 
-    DEBUG_Lv(PerlIO_printf(Perl_debug_log,
-             "(%d): emulate_setlocale_i now using C object=%p\n",
-             line, PL_C_locale_obj));
-
-    /* If this call is to switch LC_ALL to the 'C' locale, it already exists,
-     * and in fact, we already have switched to it (in preparation for what
-     * normally is to come).  But since we're already there, continue to use
-     * it instead of trying to create a new locale */
-    if (mask == LC_ALL_MASK && isNAME_C_OR_POSIX(new_locale)) {
-
-        DEBUG_Lv(PerlIO_printf(Perl_debug_log, "will stay in C object\n"));
-
-        new_obj = PL_C_locale_obj;
-
-        /* We already had switched to the C locale in preparation for freeing
-         * 'old_obj' */
-        if (old_obj != LC_GLOBAL_LOCALE && old_obj != PL_C_locale_obj) {
-            freelocale(old_obj);
+            /* ... which should now be freed if it isn't a special one */
+            if (   old_obj != PL_C_locale_obj
+                && old_obj != PL_underlying_numeric_obj
+                && old_obj != LC_GLOBAL_LOCALE)
+            {
+                freelocale(old_obj);
+            }
         }
     }
-    else {
+    else {  /* Here, changing a single category. */
+        assert(PL_C_locale_obj);
+
+        /* That means this new value is effectively an incremental change to
+         * what we already are using.  Some libcs require modifications to be
+         * done only to locales that aren't currently in use.  So temporarily
+         * switch to a known valid locale object that we don't otherwise mess
+         * with; the function returns the locale object in effect prior to the
+         * switch. */
+        old_obj = uselocale(PL_C_locale_obj);
+        if (old_obj == NULL) {
+            new_locale = "C";
+            new_obj = PL_C_locale_obj;
+            goto bad_uselocale;
+        }
+
+        DEBUG_Lv(PerlIO_printf(Perl_debug_log,
+                 "(%d): emulate_setlocale_i was using %p;"
+                 " now using C object=%p\n",
+                 line, old_obj, PL_C_locale_obj));
+
         /* If we weren't in a thread safe locale, set so that newlocale() below
          * which uses 'old_obj', gets a legal copy.  */
         if (old_obj == LC_GLOBAL_LOCALE) {
+            unsigned int i;
+
             old_obj = duplocale(old_obj);
 
-#    ifdef USE_PL_CURLOCALES
+#    ifndef USE_PL_CURLOCALES
 
-            {   /* Fill in our records with the correct values, calculating
-                 * LC_ALL's entry on the final iteration */
-                unsigned int i;
-                for (i = 0; i < NOMINAL_LC_ALL_INDEX; i++) {
-                    PORCELAIN_SETLOCALE_LOCK;
-                    update_PL_curlocales_i(i,
-                                           stdized_setlocale(categories[i],
-                                                               NULL),
-                                           LOOPING);
-                    PORCELAIN_SETLOCALE_UNLOCK;
-                }
+            PERL_UNUSED_VAR(i);
+#    else
+            /* Since the value comes from the global locale, we can access it
+             * directly even without querylocale().  Fill in our records with
+             * the correct values, calculating LC_ALL's entry on the final
+             * iteration */
+            for (i = 0; i < NOMINAL_LC_ALL_INDEX; i++) {
+                PORCELAIN_SETLOCALE_LOCK;
+                update_PL_curlocales_i(i,
+                                     stdized_setlocale(categories[i], NULL),
+                                     LOOPING);
+                PORCELAIN_SETLOCALE_UNLOCK;
             }
-
 #    endif
 
         }
@@ -1238,6 +1252,23 @@ S_emulate_setlocale_i(pTHX_
 
         /* Ready to create a new locale by modification of the exising one */
         new_obj = newlocale(mask, new_locale, old_obj);
+        if (UNLIKELY(new_obj == NULL)) {
+            goto bad_newlocale;
+        }
+
+        DEBUG_Lv(STMT_START {
+            PerlIO_printf(Perl_debug_log,
+                          "(%d): emulate_setlocale_i created %p",
+                          line, new_obj);
+            if (old_obj) PerlIO_printf(Perl_debug_log,
+                                       "; should have freed %p", old_obj);
+            PerlIO_printf(Perl_debug_log, "\n");
+        } STMT_END);
+
+        /* And switch into it */
+        if (UNLIKELY(! uselocale(new_obj))) { /* Shouldn't happen */
+            goto bad_uselocale;
+        }
 
 #    ifndef USE_PL_CURLOCALES
         if (strNE(calculate_LC_ALL(PL_C_locale_obj), "C")) {
@@ -1247,43 +1278,6 @@ S_emulate_setlocale_i(pTHX_
         }
 #endif
 
-        if (! new_obj) {
-            DEBUG_L(PerlIO_printf(Perl_debug_log,
-                    "(%d): emulate_setlocale_i creating new object"
-                    " failed: %d\n", line, GET_ERRNO));
-
-            if (! uselocale(old_obj)) {
-                DEBUG_L(PerlIO_printf(Perl_debug_log,
-                        "switching back failed: %d\n", GET_ERRNO));
-            }
-
-            return NULL;
-        }
-
-        DEBUG_Lv(STMT_START {
-            PerlIO_printf(Perl_debug_log,
-                          "(%d): emulate_setlocale_i created %p",
-                          line, new_obj);
-                    if (old_obj) PerlIO_printf(Perl_debug_log,
-                                               "; should have freed %p",
-                                               old_obj);
-            PerlIO_printf(Perl_debug_log, "\n");
-                 } STMT_END);
-
-        /* And switch into it */
-        if (! uselocale(new_obj)) {
-            DEBUG_L(PerlIO_printf(Perl_debug_log,
-                    "(%d): emulate_setlocale_i switching to new object"
-                    " failed\n", line));
-
-            if (! uselocale(old_obj)) {
-                DEBUG_L(PerlIO_printf(Perl_debug_log,
-                         "switching back failed: %d\n", GET_ERRNO));
-            }
-
-            freelocale(new_obj);
-            return NULL;
-        }
     }
 
     /* Here, we are using 'new_obj' which matches the input 'new_locale'. */
@@ -1323,6 +1317,25 @@ S_emulate_setlocale_i(pTHX_
 #  endif
 
     return new_locale;
+
+  bad_newlocale:    /* Could just be a bad locale name */
+    DEBUG_L(PerlIO_printf(Perl_debug_log,
+            "(%d): emulate_setlocale_i creating new object"
+            " failed: %d\n", line, GET_ERRNO));
+
+    if (old_obj && ! uselocale(old_obj)) {
+        DEBUG_L(PerlIO_printf(Perl_debug_log,
+                "switching back failed: %d\n", GET_ERRNO));
+    }
+
+    return NULL;
+
+  bad_uselocale:    /* Shouldn't happen because we verify the argument before
+                       calling uselocale(); */
+    locale_panic_(Perl_form(aTHX_ "(%d): emulate_setlocale_i switching to '%s'"
+                                  " failed; new_obj=%p\n",
+                                  line, new_locale, new_obj));
+    NOT_REACHED; /* NOTREACHED */
 }
 
 #endif   /* End of the various implementations of the setlocale and
@@ -1404,7 +1417,6 @@ S_stdize_locale(pTHX_ const int category,
                 made_changes = TRUE;
             }
         }
-    }
 
         /* If all the individual categories were ok as-is, this was a false
          * alarm.  We must have seen an '=' which was a legal occurrence in
@@ -1994,11 +2006,8 @@ S_new_ctype(pTHX_ const char *newctype)
 
         if (DEBUG_Lv_TEST) {
             for (i = 128; i < 256; i++) {
-                if (   toU8_LOWER_LC(LATIN1_TO_NATIVE(i))
-                                  != LATIN1_TO_NATIVE(i)
-                    || toU8_UPPER_LC(LATIN1_TO_NATIVE(i))
-                                  != LATIN1_TO_NATIVE(i))
-                {
+                int j = LATIN1_TO_NATIVE(i);
+                if (toU8_LOWER_LC(j) != j || toU8_UPPER_LC(j) != j) {
                     has_non_ascii_fold = TRUE;
                     break;
                 }
@@ -4002,9 +4011,9 @@ S_my_langinfo_i(pTHX_
 
         retval = my_langinfo_i(item, cat_index, NULL, retbufp, retbuf_sizep,
                                utf8ness);
-            restore_toggled_locale_i(cat_index, orig_switched_locale);
-            return retval;
-        }
+        restore_toggled_locale_i(cat_index, orig_switched_locale);
+        return retval;
+    }
 
     /* Here, we are in the locale we want information about */
 
@@ -4013,7 +4022,7 @@ S_my_langinfo_i(pTHX_
         assert(item < 0);   /* Make sure using perl_langinfo.h */
         return "";
 
-            case RADIXCHAR:
+      case RADIXCHAR:
 
 #    if  defined(HAS_SNPRINTF)                                               \
      && (defined(TS_W32_BROKEN_LOCALECONV) || ! defined(HAS_SOME_LOCALECONV))
