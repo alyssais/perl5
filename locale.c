@@ -1205,9 +1205,7 @@ S_emulate_setlocale_i(pTHX_
     }
     else {
         /* If we weren't in a thread safe locale, set so that newlocale() below
-         * which uses 'old_obj', gets a legal copy.  And, as a defensive coding
-         * measure, make sure we don't mistakenly modify our reserved C
-         * object, which the newlocale() just below would otherwise do. */
+         * which uses 'old_obj', gets a legal copy.  */
         if (old_obj == LC_GLOBAL_LOCALE) {
             old_obj = duplocale(old_obj);
 
@@ -1229,8 +1227,13 @@ S_emulate_setlocale_i(pTHX_
 #    endif
 
         }
-        else if (old_obj == PL_C_locale_obj) {
-            old_obj = (locale_t) 0;
+        else if (   old_obj == PL_C_locale_obj
+                 || old_obj == PL_underlying_numeric_obj)
+        {
+            /* And, as a defensive coding measure, make sure we don't
+             * mistakenly modify our reserved objects, which the newlocale()
+             * just below would otherwise do. */
+            old_obj = duplocale(old_obj);
         }
 
         /* Ready to create a new locale by modification of the exising one */
