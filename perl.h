@@ -1,5 +1,4 @@
 /*    perl.h
- *
  *    Copyright (C) 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001
  *    2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 by Larry Wall and others
  *
@@ -10,11 +9,6 @@
 
 #ifndef H_PERL
 #define H_PERL 1
-#if 0
-#define DEBUG_PRE_STMTS   dSAVE_ERRNO;                                        \
-                PerlIO_printf(Perl_debug_log, "%s:%d: ", __FILE__, __LINE__);
-#define DEBUG_POST_STMTS  RESTORE_ERRNO;
-#endif
 
 #ifdef PERL_FOR_X2P
 /*
@@ -1103,6 +1097,27 @@ Example usage:
 #      define USE_POSIX_2008_LOCALE
 #    endif
 #  endif
+
+#if defined(PERL_IN_LOCALE_C) || defined(PERL_IN_DUMP_C) || defined(PERL_IN_SV_C) || defined(PERL_IN_VUTIL_C) || defined(PERL_IN_NUMERIC_C)
+#  ifndef USE_ITHREADS
+#    define PRE_aTHX_ NULL
+#    define PRE_per_thread_ 0
+#  else
+#    define PRE_aTHX_ aTHX
+#    ifndef USE_THREAD_SAFE_LOCALE
+#      define PRE_per_thread_ 0
+#    else
+#      ifdef WIN32
+#        define PRE_per_thread_ (_configthreadlocale(0) == _ENABLE_PER_THREAD_LOCALE);
+#      else
+#        define PRE_per_thread_ (uselocale((locale_t) 0) != LC_GLOBAL_LOCALE)
+#      endif
+#    endif
+#  endif
+#  define DEBUG_PRE_STMTS   dSAVE_ERRNO;                                        \
+ PerlIO_printf(Perl_debug_log, "%s:%d:%p:%d: ", __FILE__, __LINE__, PRE_aTHX_, PRE_per_thread_);
+#  define DEBUG_POST_STMTS  RESTORE_ERRNO;
+#endif
 
 /* Allow use of glib's undocumented querylocale() equivalent if asked for, and
  * appropriate */

@@ -25,11 +25,12 @@ $Data::Dumper::Useqq = 1;
 $Data::Dumper::Deepcopy = 1;
 
 plan(2);
-my $debug = $^O eq 'cygwin' or $^O =~ /MSWin32/i;
+my $debug = 1 if $^O =~ /MSWin32/i;
+#$debug = 1;
 local $^D = 0x04000000|0x00100000 if $debug;
 
 my $thread_count = $^O =~ /linux/i ? 50 : 3;
-$thread_count = 3;
+#$thread_count = 3;
 my $iterations = 1000;
 my $max_result_length = 10000;
 
@@ -115,6 +116,24 @@ my @prioritized = ('C');
 push @prioritized, shift @utf8_locales if @utf8_locales;
 push @prioritized, shift @non_utf8_locales if @non_utf8_locales;
 my @valid_locales = sort final_ordering @prioritized, @non_utf8_locales, @utf8_locales;
+
+sub final_ordering
+{
+    for my $i (0 .. @prioritized - 1) {
+        next unless $a eq $prioritized[$i];
+        for my $j (0 .. @prioritized - 1) {
+            return ($i <= $j) ? -1 : 1 if $b eq $prioritized[$i];
+        }
+
+        # $a is priority; $b isn't
+        return -1;
+    }
+
+    # $a isn't a priority
+    return 1 if grep { $b eq $_ } @prioritized;
+
+    ordering;
+}
 
 # This test is fast, and so ignores the limits above that apply to later tests
 SKIP: { # perl #127708
@@ -344,6 +363,7 @@ SKIP: {
 
     my $case_insensitive_matching_test = <<~'EOT';
     #use re qw(Debug ALL);
+    no warnings "locale"; 
     my $uc = CORE::uc join "", map { chr } (0..255);
     my $fc = quotemeta CORE::fc $uc;
     $uc =~ / \A $fc \z /xi;
@@ -372,24 +392,24 @@ SKIP: {
         }
 
         if ($category eq 'LC_CTYPE') {
-            add_trials('LC_CTYPE', 'quotemeta lc join "", map { chr } (0..255)');
-            add_trials('LC_CTYPE', 'quotemeta uc join "", map { chr } (0..255)');
-            add_trials('LC_CTYPE', 'quotemeta CORE::fc join "", map { chr } (0..255)');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/\d/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/\s/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/\w/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:alpha:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:alnum:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:ascii:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:blank:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:cntrl:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:graph:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:lower:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:print:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:punct:]]/?1:0|gers');
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:upper:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; quotemeta lc join "", map { chr } (0..255)');
+            add_trials('LC_CTYPE', 'no warnings "locale"; quotemeta uc join "", map { chr } (0..255)');
+            add_trials('LC_CTYPE', 'no warnings "locale"; quotemeta CORE::fc join "", map { chr } (0..255)');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/\d/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/\s/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/\w/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:alpha:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:alnum:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:ascii:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:blank:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:cntrl:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:graph:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:lower:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:print:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:punct:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:upper:]]/?1:0|gers');
             print STDERR __FILE__, ": ", __LINE__, ": Got here\n" if $debug;
-            add_trials('LC_CTYPE', 'my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:xdigit:]]/?1:0|gers');
+            add_trials('LC_CTYPE', 'no warnings "locale"; my $string = join "", map { chr } 0..255; $string =~ s|(.)|$1=~/[[:xdigit:]]/?1:0|gers');
             print STDERR __FILE__, ": ", __LINE__, ": Got here\n" if $debug;
             add_trials('LC_CTYPE', $langinfo_LC_CTYPE) unless $debug;;
             print STDERR __FILE__, ": ", __LINE__, ": Got here\n" if $debug;
@@ -447,25 +467,8 @@ SKIP: {
     }
 
     print STDERR __FILE__, __LINE__, ": ", Dumper \%tests_prep if $debug;
-    #__END__
-
-    sub final_ordering
-    {
-        for my $i (0 .. @prioritized - 1) {
-            next unless $a eq $prioritized[$i];
-            for my $j (0 .. @prioritized - 1) {
-                return ($i <= $j) ? -1 : 1 if $b eq $prioritized[$i];
-            }
-
-            # $a is priority; $b isn't
-            return -1;
-        }
-
-        # $a isn't a priority
-        return 1 if grep { $b eq $_ } @prioritized;
-
-        ordering;
-    }
+#}
+#__END__
 
     my @tests;
     for my $i (1 .. $thread_count) {
@@ -526,7 +529,8 @@ SKIP: {
     }
 
     print STDERR __FILE__, ": ", __LINE__, ": ", Dumper \@tests;
-    #__END__
+#}
+#__END__
 
     my $tests_expanded = Data::Dumper->Dump([ \@tests ], [ 'all_tests_ref' ]);
     my $starting_time = sprintf "%.16e", (    time()
@@ -616,6 +620,7 @@ SKIP: {
                             \$corrects{\$category_name}++;
                         }
                         else {
+                            no locale;
                             \$|=1;
                             \$errors++;
                             my \$locale

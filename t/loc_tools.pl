@@ -25,7 +25,7 @@ my @known_categories = ( qw(LC_ALL LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY
 my @platform_categories;
 
 my $debug = 0;
-$debug = 1 if $^O =~ /cygwin /xi; #| darwin /xi; # or $^O =~ /MSWin32/i;
+#$debug = 1 if $^O =~ /cygwin /xi; #| darwin /xi; # or $^O =~ /MSWin32/i;
 my $save_D = $^D;
 local $^D = $save_D if $debug;
 
